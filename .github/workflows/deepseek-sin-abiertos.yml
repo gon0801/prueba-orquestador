@@ -113,7 +113,8 @@ jobs:
             [ "$rama" = "$default" ] && continue
             [ "${punta[$rama]:-}" = "$sha" ] || continue
             if grep -qxF "$rama" <<<"$abiertas"; then echo "se queda (la usa un PR abierto): ${rama}"; continue; fi
-            if gh api -X DELETE "repos/${repo}/git/refs/heads/${rama}" >/dev/null; then
+            ruta="$(jq -rn --arg r "$rama" '$r | split("/") | map(@uri) | join("/")')"
+            if gh api -X DELETE "repos/${repo}/git/refs/heads/${ruta}" >/dev/null; then
               echo "borrada: ${rama}"
             else
               echo "no se pudo borrar: ${rama}"
