@@ -60,7 +60,7 @@ jobs:
             # Se actualizan todas las marcas de este commit: una pendiente vieja junto a
             # una nueva en verde basta para que la protección de main bloquee el merge.
             # Una pendiente nueva no reabre una marca ya cerrada.
-            existentes="$(gh api "repos/${repo}/commits/${sha}/check-runs?check_name=deepseek-sin-abiertos&per_page=100" \
+            existentes="$(gh api "repos/${repo}/commits/${sha}/check-runs?check_name=deepseek-sin-abiertos&filter=all&per_page=100" \
               --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status)"')"
             if [ -z "$existentes" ]; then
               gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
