@@ -202,3 +202,49 @@ def test_cli_buscar_no_reescribe_el_archivo(tmp_path, capsys):
 
     assert capsys.readouterr().out == "Arroz: 4\n"
     assert archivo.read_bytes() == antes
+
+
+def test_reporte_termina_con_total_de_articulos_distintos_no_de_existencias():
+    inv = Inventario()
+    inv.agregar("Frijol", 5)
+    inv.agregar("frijol", 3)
+    inv.agregar("Arroz", 2)
+    # Dos artículos distintos (Frijol se juntó), aunque haya 10 piezas en total.
+    assert inv.reporte() == "Arroz: 2\nFrijol: 8\nTotal: 2 artículos"
+
+
+def test_reporte_total_cuenta_los_articulos_que_quedaron_en_cero():
+    inv = Inventario()
+    inv.agregar("Arroz", 3)
+    inv.agregar("Frijol", 5)
+    inv.quitar("arroz", 3)
+    assert inv.reporte() == "Arroz: 0\nFrijol: 5\nTotal: 2 artículos"
+
+
+def test_reporte_total_con_un_solo_articulo_va_en_singular():
+    # Decisión: "Total: 1 artículo", porque "1 artículos" se lee como error.
+    inv = Inventario()
+    inv.agregar("Sal", 1)
+    assert inv.reporte() == "Sal: 1\nTotal: 1 artículo"
+
+
+def test_reporte_vacio_queda_igual_sin_total():
+    assert Inventario().reporte() == "Inventario vacío."
+
+
+def test_cli_reporte_pone_el_total_en_la_ultima_linea(tmp_path, capsys):
+    archivo = str(tmp_path / "inv.json")
+    assert main(["--archivo", archivo, "agregar", "Leche", "3", "--minimo", "5"]) == 0
+    assert main(["--archivo", archivo, "agregar", "Azúcar", "9"]) == 0
+    assert main(["--archivo", archivo, "agregar", "Arroz", "4"]) == 0
+    capsys.readouterr()
+
+    assert main(["--archivo", archivo, "reporte"]) == 0
+
+    assert capsys.readouterr().out == "Arroz: 4\nAzúcar: 9\nLeche: 3 (bajo mínimo)\nTotal: 3 artículos\n"
+
+
+def test_cli_reporte_de_inventario_vacio_no_agrega_total(tmp_path, capsys):
+    assert main(["--archivo", str(tmp_path / "inv.json"), "reporte"]) == 0
+
+    assert capsys.readouterr().out == "Inventario vacío.\n"
