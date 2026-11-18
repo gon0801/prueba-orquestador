@@ -1,0 +1,51 @@
+name: deepseek-sin-abiertos
+
+# Check requerido por la protección de main. El sticky lo publica GITHUB_TOKEN y
+# sus eventos no lanzan workflows: por eso se reevalúa al terminar el publicador
+# y, como red, cada 15 minutos sobre los PR abiertos.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_run:
+    workflows: [ai-review-publish]
+    types: [completed]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  evaluar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: deepseek-sin-abiertos
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Evaluar los PR abiertos y publicar el check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          for numero in $(gh api "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].number'); do
+            sha="$(gh api "repos/${repo}/pulls/${numero}" --jq .head.sha)"
+            set +e
+            nota="$(python3 .github/scripts/compuerta.py "$repo" "$numero")"
+            rc=$?
+            set -e
+            case "$rc" in
+              0) args=(-f status=completed -f conclusion=success) ;;
+              1) args=(-f status=completed -f conclusion=failure) ;;
+              *) args=(-f status=in_progress) ;;
+            esac
+            gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
+              "${args[@]}" -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+            echo "#${numero} ${sha:0:7} rc=${rc} ${nota}"
+          done

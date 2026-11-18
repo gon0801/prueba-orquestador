@@ -1,0 +1,22 @@
+name: auto-merge
+
+# Cada PR queda en "mergear cuando pase todo". GitHub lo mergea cuando la
+# protección de main se cumple (pruebas y deepseek-sin-abiertos) y borra la rama.
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  activar:
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR" --auto --merge -R "$GITHUB_REPOSITORY"
