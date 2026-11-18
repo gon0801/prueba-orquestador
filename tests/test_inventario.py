@@ -210,7 +210,7 @@ def test_reporte_termina_con_total_de_articulos_distintos_no_de_existencias():
     inv.agregar("frijol", 3)
     inv.agregar("Arroz", 2)
     # Dos artículos distintos (Frijol se juntó), aunque haya 10 piezas en total.
-    assert inv.reporte() == "Arroz: 2\nFrijol: 8\nTotal: 2 artículos"
+    assert inv.reporte() == "Arroz: 2\nFrijol: 8\n\nTotal: 2 artículos"
 
 
 def test_reporte_total_cuenta_los_articulos_que_quedaron_en_cero():
@@ -218,14 +218,22 @@ def test_reporte_total_cuenta_los_articulos_que_quedaron_en_cero():
     inv.agregar("Arroz", 3)
     inv.agregar("Frijol", 5)
     inv.quitar("arroz", 3)
-    assert inv.reporte() == "Arroz: 0\nFrijol: 5\nTotal: 2 artículos"
+    assert inv.reporte() == "Arroz: 0\nFrijol: 5\n\nTotal: 2 artículos"
 
 
 def test_reporte_total_con_un_solo_articulo_va_en_singular():
     # Decisión: "Total: 1 artículo", porque "1 artículos" se lee como error.
     inv = Inventario()
     inv.agregar("Sal", 1)
-    assert inv.reporte() == "Sal: 1\nTotal: 1 artículo"
+    assert inv.reporte() == "Sal: 1\n\nTotal: 1 artículo"
+
+
+def test_reporte_separa_el_total_de_un_articulo_llamado_total():
+    # Un artículo puede llamarse "Total": la línea en blanco deja claro cuál es el resumen.
+    inv = Inventario()
+    inv.agregar("Total", 5)
+    inv.agregar("Arroz", 2)
+    assert inv.reporte() == "Arroz: 2\nTotal: 5\n\nTotal: 2 artículos"
 
 
 def test_reporte_vacio_queda_igual_sin_total():
@@ -241,7 +249,7 @@ def test_cli_reporte_pone_el_total_en_la_ultima_linea(tmp_path, capsys):
 
     assert main(["--archivo", archivo, "reporte"]) == 0
 
-    assert capsys.readouterr().out == "Arroz: 4\nAzúcar: 9\nLeche: 3 (bajo mínimo)\nTotal: 3 artículos\n"
+    assert capsys.readouterr().out == "Arroz: 4\nAzúcar: 9\nLeche: 3 (bajo mínimo)\n\nTotal: 3 artículos\n"
 
 
 def test_cli_reporte_de_inventario_vacio_no_agrega_total(tmp_path, capsys):
