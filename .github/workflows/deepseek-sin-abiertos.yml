@@ -1,8 +1,10 @@
 name: deepseek-sin-abiertos
 
 # Check requerido por la protección de main. El sticky lo publica GITHUB_TOKEN y
-# sus eventos no lanzan workflows: por eso se reevalúa al terminar el publicador
-# y, como red, cada 15 minutos sobre los PR abiertos.
+# sus eventos no lanzan workflows, así que al abrir o actualizar un PR el job se
+# queda leyendo hasta que DeepSeek publica para esa cabeza (como mucho 40 min) y
+# entonces marca. Un push nuevo cancela la espera anterior. El calendario y el
+# disparo manual reevalúan todos los PR abiertos, como red de seguridad.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
@@ -22,24 +24,34 @@ permissions:
 jobs:
   evaluar:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 45
     concurrency:
-      group: deepseek-sin-abiertos
-      cancel-in-progress: false
+      group: deepseek-sin-abiertos-${{ github.event.pull_request.number || 'todos' }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Evaluar los PR abiertos y publicar el check
+      - name: Evaluar y publicar el check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_EVENTO: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
-          for numero in $(gh api "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].number'); do
-            sha="$(gh api "repos/${repo}/pulls/${numero}" --jq .head.sha)"
-            set +e
-            nota="$(python3 .github/scripts/compuerta.py "$repo" "$numero")"
-            rc=$?
-            set -e
+
+          publicar() { # numero esperar
+            local numero=$1 esperar=$2 sha nota rc limite
+            limite=$(( $(date +%s) + 2400 ))
+            while :; do
+              sha="$(gh api "repos/${repo}/pulls/${numero}" --jq .head.sha)"
+              set +e
+              nota="$(python3 .github/scripts/compuerta.py "$repo" "$numero")"
+              rc=$?
+              set -e
+              if [ "$rc" != 2 ] || [ "$esperar" != si ] || [ "$(date +%s)" -ge "$limite" ]; then
+                break
+              fi
+              sleep 20
+            done
             case "$rc" in
               0) args=(-f status=completed -f conclusion=success) ;;
               1) args=(-f status=completed -f conclusion=failure) ;;
@@ -48,4 +60,12 @@ jobs:
             gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
               "${args[@]}" -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
             echo "#${numero} ${sha:0:7} rc=${rc} ${nota}"
-          done
+          }
+
+          if [ -n "$PR_EVENTO" ]; then
+            publicar "$PR_EVENTO" si
+          else
+            for numero in $(gh api "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].number'); do
+              publicar "$numero" no
+            done
+          fi
