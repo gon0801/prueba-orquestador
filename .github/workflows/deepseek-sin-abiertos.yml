@@ -1,16 +1,13 @@
 name: deepseek-sin-abiertos
 
-# Check requerido por la protección de main. El sticky lo publica GITHUB_TOKEN y
-# sus eventos no lanzan workflows, así que al abrir o actualizar un PR el job se
-# queda leyendo hasta que DeepSeek publica para esa cabeza (como mucho 40 min) y
-# entonces marca. Un push nuevo cancela la espera anterior. El calendario y el
-# disparo manual reevalúan todos los PR abiertos, como red de seguridad.
+# El check requerido "deepseek-sin-abiertos" es el resultado de este job, como
+# "pruebas": GitHub no siempre cuenta las marcas creadas aparte por la API. Al
+# abrir o actualizar un PR, el job espera la revisión de DeepSeek de esa cabeza
+# (máx. 40 min) y termina en verde sin hallazgos medios o mayores abiertos, o en
+# rojo. Un push nuevo cancela la espera anterior.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-  workflow_run:
-    workflows: [ai-review-publish]
-    types: [completed]
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
@@ -19,75 +16,85 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
-  checks: write
 
 jobs:
-  evaluar:
+  deepseek-sin-abiertos:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
-      group: deepseek-sin-abiertos-${{ github.event.pull_request.number || 'todos' }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      group: deepseek-sin-abiertos-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
-      - name: Evaluar y publicar el check
+      - name: Esperar la revisión de DeepSeek de esta cabeza
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_EVENTO: ${{ github.event.pull_request.number }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          limite=$(( $(date +%s) + 2400 ))
+          while :; do
+            nota="$(python3 .github/scripts/compuerta.py "$GITHUB_REPOSITORY" "$PR")"
+            rc=$?
+            echo "$nota"
+            [ "$rc" = 0 ] && exit 0
+            [ "$rc" = 1 ] && exit 1
+            [ "$(date +%s)" -ge "$limite" ] && { echo "DeepSeek no publicó en 40 min; la vuelta de 15 min lo vuelve a correr"; exit 1; }
+            sleep 20
+          done
+
+  # Si DeepSeek publicó después de que el job de un PR terminó en rojo, lo vuelve a
+  # correr. También borra las ramas de PR ya mergeados: GitHub no las borra cuando
+  # el merge lo hace el auto-merge de GITHUB_TOKEN. Solo una rama intacta (su punta
+  # es la que se mergeó) y que ningún PR abierto usa.
+  mantenimiento:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Volver a correr la compuerta donde DeepSeek ya aprobó
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          repo="$GITHUB_REPOSITORY"
+          for numero in $(gh api --paginate "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].number'); do
+            sha="$(gh api "repos/${repo}/pulls/${numero}" --jq .head.sha)"
+            python3 .github/scripts/compuerta.py "$repo" "$numero" >/dev/null || continue
+            run="$(gh api "repos/${repo}/actions/workflows/deepseek-sin-abiertos.yml/runs?event=pull_request&head_sha=${sha}&per_page=1" \
+              --jq '.workflow_runs[0] | select(.status == "completed" and .conclusion != "success") | .id')"
+            if [ -n "$run" ]; then
+              gh api -X POST "repos/${repo}/actions/runs/${run}/rerun-failed-jobs" >/dev/null && echo "#${numero}: compuerta relanzada"
+            fi
+          done
+      - name: Borrar ramas de PR mergeados
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
-
-          publicar() { # numero esperar
-            local numero=$1 esperar=$2 sha nota rc limite
-            limite=$(( $(date +%s) + 2400 ))
-            while :; do
-              sha="$(gh api "repos/${repo}/pulls/${numero}" --jq .head.sha)"
-              set +e
-              nota="$(python3 .github/scripts/compuerta.py "$repo" "$numero")"
-              rc=$?
-              set -e
-              if [ "$rc" != 2 ] || [ "$esperar" != si ] || [ "$(date +%s)" -ge "$limite" ]; then
-                break
-              fi
-              sleep 20
-            done
-            case "$rc" in
-              0) args=(-f status=completed -f conclusion=success) ;;
-              1) args=(-f status=completed -f conclusion=failure) ;;
-              *) args=(-f status=in_progress) ;;
-            esac
-            # Se actualizan todas las marcas de este commit: una pendiente vieja junto a
-            # una nueva en verde basta para que la protección de main bloquee el merge.
-            # Una pendiente nueva no reabre una marca ya cerrada.
-            existentes="$(gh api "repos/${repo}/commits/${sha}/check-runs?check_name=deepseek-sin-abiertos&filter=all&per_page=100" \
-              --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status)"')"
-            while read -r id estado; do
-              [ -n "$id" ] || continue
-              if [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$estado" != completed ]; then
-                gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
-                  -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
-              fi
-            done <<<"$existentes"
-            # Una marca que nace ya terminada no siempre cuenta para la protección de main
-            # (pasó en #3 y #4). Si no hay ninguna, o si aprueba y GitHub sigue bloqueando,
-            # se crea una nueva en curso y luego se cierra, que es la forma que sí reconoce.
-            bloqueado="$(gh api "repos/${repo}/pulls/${numero}" --jq .mergeable_state)"
-            if [ -z "$existentes" ] || { [ "$rc" = 0 ] && [ "$bloqueado" = blocked ]; }; then
-              id="$(gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
-                -f status=in_progress -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" --jq .id)"
-              if [ "$rc" = 0 ] || [ "$rc" = 1 ]; then
-                gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
-                  -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
-              fi
+          default="$(gh api "repos/${repo}" --jq .default_branch)"
+          declare -A punta
+          while read -r nombre sha; do punta["$nombre"]="$sha"; done < <(
+            gh api --paginate "repos/${repo}/branches?per_page=100" --jq '.[] | "\(.name) \(.commit.sha)"')
+          abiertas="$(gh api --paginate "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].head.ref')"
+          gh api --paginate "repos/${repo}/pulls?state=closed&per_page=100" \
+            --jq ".[] | select(.merged_at != null and .head.repo.full_name == \"${repo}\") | \"\(.head.ref) \(.head.sha)\"" |
+          while read -r rama sha; do
+            [ "$rama" = "$default" ] && continue
+            [ "${punta[$rama]:-}" = "$sha" ] || continue
+            if grep -qxF "$rama" <<<"$abiertas"; then echo "se queda (la usa un PR abierto): ${rama}"; continue; fi
+            ruta="$(jq -rn --arg r "$rama" '$r | split("/") | map(@uri) | join("/")')"
+            if gh api -X DELETE "repos/${repo}/git/refs/heads/${ruta}" >/dev/null; then
+              echo "borrada: ${rama}"
+            else
+              echo "no se pudo borrar: ${rama}"
             fi
-            echo "#${numero} ${sha:0:7} rc=${rc} ${nota}"
-          }
-
-          if [ -n "$PR_EVENTO" ]; then
-            publicar "$PR_EVENTO" si
-          else
-            for numero in $(gh api "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].number'); do
-              publicar "$numero" no
-            done
-          fi
+          done
