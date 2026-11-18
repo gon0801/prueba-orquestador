@@ -37,6 +37,10 @@ class Inventario:
         articulo = self.articulos.get(nombre.strip().lower())
         if articulo is None:
             raise KeyError(f"no existe el artículo {nombre!r}")
+        if cantidad > articulo.existencias:
+            raise ValueError(
+                f"no alcanza {articulo.nombre!r}: hay {articulo.existencias} y se pidieron {cantidad}"
+            )
         articulo.existencias -= cantidad
         return articulo
 
