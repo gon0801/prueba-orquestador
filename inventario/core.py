@@ -76,7 +76,9 @@ class Inventario:
             marca = " (bajo mínimo)" if articulo.existencias < articulo.minimo else ""
             lineas.append(f"{articulo.nombre}: {articulo.existencias}{marca}")
         # Cuenta artículos distintos (los en cero también), no la suma de existencias.
+        # La línea en blanco lo separa de un artículo que se llame "Total".
         total = len(self.articulos)
+        lineas.append("")
         lineas.append(f"Total: {total} {'artículo' if total == 1 else 'artículos'}")
         return "\n".join(lineas)
 

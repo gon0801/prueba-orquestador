@@ -12,7 +12,8 @@ python -m inventario buscar azucar
 
 `reporte` lista cada artículo con sus existencias y termina con una línea `Total: N artículos` que
 cuenta los artículos distintos (no la suma de existencias; con uno solo dice `Total: 1 artículo`).
-Si el inventario está vacío, solo dice `Inventario vacío.`.
+Una línea en blanco separa ese total de la lista, para que no se confunda con un artículo que se
+llame "Total". Si el inventario está vacío, solo dice `Inventario vacío.`.
 
 `buscar` encuentra los artículos que contienen el texto en su nombre, sin importar mayúsculas ni
 acentos (`azucar` encuentra `Azúcar`, y `nino` encuentra `Niño`), y muestra sus existencias.
