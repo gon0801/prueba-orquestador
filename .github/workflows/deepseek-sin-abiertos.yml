@@ -32,11 +32,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          set -uo pipefail
+          # El runner usa bash -e: el código 2 ("todavía no") se captura para no cortar la espera.
+          set -u
           limite=$(( $(date +%s) + 2400 ))
           while :; do
-            nota="$(python3 .github/scripts/compuerta.py "$GITHUB_REPOSITORY" "$PR")"
-            rc=$?
+            nota="$(python3 .github/scripts/compuerta.py "$GITHUB_REPOSITORY" "$PR")" && rc=0 || rc=$?
             echo "$nota"
             [ "$rc" = 0 ] && exit 0
             [ "$rc" = 1 ] && exit 1
