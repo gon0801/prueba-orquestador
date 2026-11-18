@@ -51,5 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     except (KeyError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
-    inventario.guardar(args.archivo)
+    # Las consultas (reporte, faltantes, buscar) no escriben: así no crean el archivo ni fallan si es de solo lectura.
+    if args.comando in ("agregar", "quitar"):
+        inventario.guardar(args.archivo)
     return 0

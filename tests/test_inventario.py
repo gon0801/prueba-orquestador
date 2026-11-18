@@ -174,3 +174,31 @@ def test_cli_buscar_texto_vacio_es_error(tmp_path, capsys):
     salida = capsys.readouterr()
     assert salida.out == ""
     assert salida.err.startswith("error: ")
+
+
+def test_buscar_ordena_sin_importar_acentos():
+    inv = Inventario()
+    inv.agregar("Zapote", 5)
+    inv.agregar("Ámbar", 1)
+    assert nombres(inv.buscar("a")) == ["Ámbar", "Zapote"]
+
+
+@pytest.mark.parametrize("consulta", [["buscar", "sal"], ["reporte"], ["faltantes"]])
+def test_cli_las_consultas_no_crean_el_archivo(tmp_path, consulta):
+    archivo = tmp_path / "inventario.json"
+
+    assert main(["--archivo", str(archivo), *consulta]) == 0
+
+    assert not archivo.exists()
+
+
+def test_cli_buscar_no_reescribe_el_archivo(tmp_path, capsys):
+    archivo = tmp_path / "inventario.json"
+    # Sin la sangría que deja guardar(): si buscar lo reescribiera, los bytes cambiarían.
+    archivo.write_text('{"arroz": {"nombre": "Arroz", "existencias": 4, "minimo": 0}}', encoding="utf-8")
+    antes = archivo.read_bytes()
+
+    assert main(["--archivo", str(archivo), "buscar", "arroz"]) == 0
+
+    assert capsys.readouterr().out == "Arroz: 4\n"
+    assert archivo.read_bytes() == antes

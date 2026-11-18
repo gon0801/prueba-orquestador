@@ -65,7 +65,7 @@ class Inventario:
             raise ValueError("el texto a buscar no puede estar vacío")
         return sorted(
             (a for a in self.articulos.values() if buscado in _normalizar(a.nombre)),
-            key=lambda a: a.nombre.lower(),
+            key=lambda a: _normalizar(a.nombre),
         )
 
     def reporte(self) -> str:
