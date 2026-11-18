@@ -86,7 +86,8 @@ jobs:
 
   # GitHub no borra la rama cuando el merge lo hace el auto-merge de GITHUB_TOKEN,
   # aunque el repo tenga "borrar al mergear". Este job borra las ramas de PR ya
-  # mergeados. No corre en eventos de PR: solo en el calendario y a mano.
+  # mergeados, solo si su punta sigue siendo la que se mergeó y ningún PR abierto
+  # la usa. No corre en eventos de PR: solo en el calendario y a mano.
   limpiar:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -101,11 +102,20 @@ jobs:
         run: |
           set -euo pipefail
           repo="$GITHUB_REPOSITORY"
-          vivas="$(gh api "repos/${repo}/branches?per_page=100" --jq '.[].name')"
-          gh api "repos/${repo}/pulls?state=closed&per_page=50" \
-            --jq ".[] | select(.merged_at != null and .head.repo.full_name == \"${repo}\") | .head.ref" |
-          while read -r rama; do
-            if [ "$rama" != main ] && grep -qxF "$rama" <<<"$vivas"; then
-              gh api -X DELETE "repos/${repo}/git/refs/heads/${rama}" && echo "borrada: ${rama}"
+          default="$(gh api "repos/${repo}" --jq .default_branch)"
+          declare -A punta
+          while read -r nombre sha; do punta["$nombre"]="$sha"; done < <(
+            gh api --paginate "repos/${repo}/branches?per_page=100" --jq '.[] | "\(.name) \(.commit.sha)"')
+          abiertas="$(gh api --paginate "repos/${repo}/pulls?state=open&per_page=100" --jq '.[].head.ref')"
+          gh api --paginate "repos/${repo}/pulls?state=closed&per_page=100" \
+            --jq ".[] | select(.merged_at != null and .head.repo.full_name == \"${repo}\") | \"\(.head.ref) \(.head.sha)\"" |
+          while read -r rama sha; do
+            [ "$rama" = "$default" ] && continue
+            [ "${punta[$rama]:-}" = "$sha" ] || continue
+            if grep -qxF "$rama" <<<"$abiertas"; then echo "se queda (la usa un PR abierto): ${rama}"; continue; fi
+            if gh api -X DELETE "repos/${repo}/git/refs/heads/${rama}" >/dev/null; then
+              echo "borrada: ${rama}"
+            else
+              echo "no se pudo borrar: ${rama}"
             fi
           done
