@@ -83,3 +83,29 @@ jobs:
               publicar "$numero" no
             done
           fi
+
+  # GitHub no borra la rama cuando el merge lo hace el auto-merge de GITHUB_TOKEN,
+  # aunque el repo tenga "borrar al mergear". Este job borra las ramas de PR ya
+  # mergeados. No corre en eventos de PR: solo en el calendario y a mano.
+  limpiar:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Borrar ramas de PR mergeados
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          vivas="$(gh api "repos/${repo}/branches?per_page=100" --jq '.[].name')"
+          gh api "repos/${repo}/pulls?state=closed&per_page=50" \
+            --jq ".[] | select(.merged_at != null and .head.repo.full_name == \"${repo}\") | .head.ref" |
+          while read -r rama; do
+            if [ "$rama" != main ] && grep -qxF "$rama" <<<"$vivas"; then
+              gh api -X DELETE "repos/${repo}/git/refs/heads/${rama}" && echo "borrada: ${rama}"
+            fi
+          done
