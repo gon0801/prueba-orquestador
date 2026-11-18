@@ -57,8 +57,22 @@ jobs:
               1) args=(-f status=completed -f conclusion=failure) ;;
               *) args=(-f status=in_progress) ;;
             esac
-            gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
-              "${args[@]}" -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+            # Se actualizan todas las marcas de este commit: una pendiente vieja junto a
+            # una nueva en verde basta para que la protección de main bloquee el merge.
+            # Una pendiente nueva no reabre una marca ya cerrada.
+            existentes="$(gh api "repos/${repo}/commits/${sha}/check-runs?check_name=deepseek-sin-abiertos&per_page=100" \
+              --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status)"')"
+            if [ -z "$existentes" ]; then
+              gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
+                "${args[@]}" -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+            else
+              while read -r id estado; do
+                if [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$estado" != completed ]; then
+                  gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
+                    -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+                fi
+              done <<<"$existentes"
+            fi
             echo "#${numero} ${sha:0:7} rc=${rc} ${nota}"
           }
 
