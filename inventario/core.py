@@ -3,8 +3,15 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas y sin diacríticos, para que 'AZÚCAR', 'azucar' y 'Azúcar' comparen igual."""
+    descompuesto = unicodedata.normalize("NFD", texto.casefold())
+    return "".join(c for c in descompuesto if not unicodedata.combining(c))
 
 
 @dataclass
@@ -47,6 +54,17 @@ class Inventario:
     def bajo_minimo(self) -> list[Articulo]:
         return sorted(
             (a for a in self.articulos.values() if a.existencias < a.minimo),
+            key=lambda a: a.nombre.lower(),
+        )
+
+    def buscar(self, texto: str) -> list[Articulo]:
+        buscado = _normalizar(texto.strip())
+        # Se revisa ya normalizado: un texto de puros acentos sueltos también queda vacío
+        # y la cadena vacía coincidiría con todo.
+        if not buscado:
+            raise ValueError("el texto a buscar no puede estar vacío")
+        return sorted(
+            (a for a in self.articulos.values() if buscado in _normalizar(a.nombre)),
             key=lambda a: a.nombre.lower(),
         )
 

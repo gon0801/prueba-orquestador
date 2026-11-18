@@ -28,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("reporte", help="muestra todas las existencias")
     sub.add_parser("faltantes", help="muestra lo que está bajo su mínimo")
 
+    buscar = sub.add_parser("buscar", help="busca por parte del nombre, sin importar mayúsculas ni acentos")
+    buscar.add_argument("texto")
+
     args = parser.parse_args(argv)
     inventario = Inventario.cargar(args.archivo)
     try:
@@ -42,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.comando == "faltantes":
             faltan = inventario.bajo_minimo()
             print("\n".join(f"{a.nombre}: {a.existencias} de {a.minimo}" for a in faltan) or "Nada bajo mínimo.")
+        elif args.comando == "buscar":
+            encontrados = inventario.buscar(args.texto)
+            print("\n".join(f"{a.nombre}: {a.existencias}" for a in encontrados) or "Sin coincidencias.")
     except (KeyError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
