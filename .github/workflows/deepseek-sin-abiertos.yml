@@ -62,16 +62,24 @@ jobs:
             # Una pendiente nueva no reabre una marca ya cerrada.
             existentes="$(gh api "repos/${repo}/commits/${sha}/check-runs?check_name=deepseek-sin-abiertos&filter=all&per_page=100" \
               --jq '.check_runs[] | select(.app.slug == "github-actions") | "\(.id) \(.status)"')"
-            if [ -z "$existentes" ]; then
-              gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
-                "${args[@]}" -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
-            else
-              while read -r id estado; do
-                if [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$estado" != completed ]; then
-                  gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
-                    -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
-                fi
-              done <<<"$existentes"
+            while read -r id estado; do
+              [ -n "$id" ] || continue
+              if [ "$rc" = 0 ] || [ "$rc" = 1 ] || [ "$estado" != completed ]; then
+                gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
+                  -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+              fi
+            done <<<"$existentes"
+            # Una marca que nace ya terminada no siempre cuenta para la protección de main
+            # (pasó en #3 y #4). Si no hay ninguna, o si aprueba y GitHub sigue bloqueando,
+            # se crea una nueva en curso y luego se cierra, que es la forma que sí reconoce.
+            bloqueado="$(gh api "repos/${repo}/pulls/${numero}" --jq .mergeable_state)"
+            if [ -z "$existentes" ] || { [ "$rc" = 0 ] && [ "$bloqueado" = blocked ]; }; then
+              id="$(gh api -X POST "repos/${repo}/check-runs" -f name=deepseek-sin-abiertos -f head_sha="$sha" \
+                -f status=in_progress -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" --jq .id)"
+              if [ "$rc" = 0 ] || [ "$rc" = 1 ]; then
+                gh api -X PATCH "repos/${repo}/check-runs/${id}" "${args[@]}" \
+                  -f "output[title]=DeepSeek sin abiertos" -f "output[summary]=${nota}" >/dev/null
+              fi
             fi
             echo "#${numero} ${sha:0:7} rc=${rc} ${nota}"
           }
